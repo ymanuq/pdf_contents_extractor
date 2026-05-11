@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "pdf_contents_extractor"
+version = "0.1.0"
+description = "给无目录标签的PDF添加可点击的层级书签"
+requires-python = ">=3.11"
+dependencies = [
+    "pymupdf>=1.27.0",
+    "thefuzz>=0.22.0",
+]
+
+[tool.setuptools]
+py-modules = ["main"]
