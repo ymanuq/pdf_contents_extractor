@@ -42,19 +42,27 @@ class TocPageParser:
             if page_num >= doc.page_count:
                 break
             text = doc[page_num].get_text()
-            for kw in self.TOC_KEYWORDS:
-                if kw in text:
-                    # 确认是目录页：排除只是提到"目录"一词的普通页面
-                    if self._is_toc_page(text):
-                        return page_num
+            if self._contains_toc_keyword(text) and self._is_toc_page(text):
+                return page_num
 
         # 全文扫描
         for page_num in range(doc.page_count):
             text = doc[page_num].get_text()
-            for kw in self.TOC_KEYWORDS:
-                if kw in text and self._is_toc_page(text):
-                    return page_num
+            if self._contains_toc_keyword(text) and self._is_toc_page(text):
+                return page_num
         return None
+
+    def _contains_toc_keyword(self, text: str) -> bool:
+        """检查文本是否包含目录关键词（忽略空格）。"""
+        normalized = re.sub(r"\s+", "", text)
+        for kw in self.TOC_KEYWORDS:
+            if kw in normalized:
+                return True
+        # 也检查原文（Contents 之类不需要去空格）
+        for kw in self.TOC_KEYWORDS:
+            if kw in text:
+                return True
+        return False
 
     def parse_entries(self, doc: pymupdf.Document, toc_page_num: int) -> list[TocEntryPage]:
         """从目录页解析条目列表。"""
@@ -114,6 +122,9 @@ class TocPageParser:
 
     def _parse_line(self, line: str, line_number: int) -> TocEntryPage | None:
         """解析单行目录条目。"""
+        # 跳过目录页的标题行本身
+        if self._is_toc_title_line(line):
+            return None
         page_hint = self._extract_page_hint(line)
         title = self._clean_title(line)
         if not title or len(title) < 2:
@@ -125,6 +136,13 @@ class TocPageParser:
             page_hint=page_hint,
             line_number=line_number,
         )
+
+    def _is_toc_title_line(self, line: str) -> bool:
+        """判断是否是目录页自己的标题行（如'目录'、'Contents'）。"""
+        stripped = line.strip()
+        if stripped in ("目录", "目次", "Contents", "CONTENTS"):
+            return True
+        return False
 
     def _extract_page_hint(self, line: str) -> int | None:
         """提取行尾的页码数字。"""
