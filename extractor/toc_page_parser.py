@@ -232,18 +232,31 @@ class TocPageParser:
         line = re.sub(r"\.{2,}.*$", "", line)
         line = re.sub(r"\s*\d{1,4}\s*$", "", line)
         line = re.sub(r"\.{3,}", " ", line)
+        # 去除各种引号
+        quotes = '"“”‘’「」『』＂'
+        for q in quotes:
+            line = line.replace(q, '')
         line = self._remove_ocr_noise(line)
-        line = self._join_spaced_cjk(line)
+        line = self._join_cjk_and_digits(line)
         return line.strip()
 
     def _remove_ocr_noise(self, text: str) -> str:
         text = re.sub(r"\b([a-zA-Z]{1,4}\s+){2,}[a-zA-Z]{1,15}\b", " ", text)
         text = re.sub(r"\b[a-zA-Z]{8,}\b", " ", text)
-        text = re.sub(r'\s+[,.，。、；;:""'']+\s*', ' ', text)
         return text
 
-    def _join_spaced_cjk(self, text: str) -> str:
-        text = re.sub(r"([一-鿿㐀-䶿])\s+([一-鿿㐀-䶿])", r"\1\2", text)
+    def _join_cjk_and_digits(self, text: str) -> str:
+        """迭代连接被空格分隔的中文字符和数字。"""
+        for _ in range(3):
+            new = re.sub(r"([一-鿿㐀-䶿])\s+([一-鿿㐀-䶿\d])", r"\1\2", text)
+            if new != text:
+                text = new
+                continue
+            new = re.sub(r"([一-鿿㐀-䶿\d])\s+([一-鿿㐀-䶿])", r"\1\2", text)
+            if new != text:
+                text = new
+                continue
+            break
         return text
 
     def _detect_level(self, line: str, title: str) -> int:
