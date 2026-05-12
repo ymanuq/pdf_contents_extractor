@@ -59,13 +59,11 @@ class PdfReader:
         return self._doc[page_num].get_text()
 
     def search_text(self, keyword: str, pages=None, threshold: int = 85) -> list[SearchResult]:
-        from thefuzz import fuzz
-
         pages = self._resolve_pages(pages)
         results = []
         for page_num in pages:
             page_text = self._doc[page_num].get_text()
-            # 先尝试精确搜索
+            # 1. 精确文本匹配（最快：C级别）
             if keyword in page_text:
                 search = self._doc[page_num].search_for(keyword)
                 if search:
@@ -76,9 +74,34 @@ class PdfReader:
                             bbox=rect,
                             score=100,
                         ))
-                    continue
-            # 模糊搜索：滑动窗口匹配
-            score = fuzz.partial_ratio(keyword, page_text)
+                else:
+                    results.append(SearchResult(
+                        text=keyword,
+                        page=page_num,
+                        bbox=(0, 0, 0, 0),
+                        score=100,
+                    ))
+                # 找到了，跳过本页
+                continue
+            # 2. 去空格精确匹配
+            normalized_key = keyword.replace(" ", "")
+            normalized_text = page_text.replace(" ", "")
+            if normalized_key in normalized_text:
+                results.append(SearchResult(
+                    text=keyword,
+                    page=page_num,
+                    bbox=(0, 0, 0, 0),
+                    score=95,
+                ))
+                continue
+            # 3. 预过滤：关键词首字出现才做模糊匹配
+            first_chars = normalized_key[:3]
+            if not any(c in normalized_text for c in first_chars):
+                continue
+            # 4. 模糊匹配
+            from thefuzz import fuzz
+            # 只匹配前2000字符（正文开头通常有标题）
+            score = fuzz.partial_ratio(normalized_key, normalized_text[:2000])
             if score >= threshold:
                 results.append(SearchResult(
                     text=keyword,
@@ -86,7 +109,6 @@ class PdfReader:
                     bbox=(0, 0, 0, 0),
                     score=score,
                 ))
-        # 去重+保留每页最高分
         return self._dedupe(results)
 
     def close(self):

@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass
 
 from extractor.pdf_reader import PdfReader
 from extractor.toc_page_parser import TocEntryPage
@@ -8,7 +9,7 @@ from extractor.toc_page_parser import TocEntryPage
 class TocEntryMatched:
     title: str
     level: int
-    page: int | None = None       # None表示未匹配到
+    page: int | None = None
     page_hint: int | None = None
     score: int | None = None
     unmatched: bool = False
@@ -19,7 +20,8 @@ class TocLocator:
         self.reader = reader
         self.threshold = threshold
 
-    def locate(self, entries: list[TocEntryPage]) -> list[TocEntryMatched]:
+    def locate(self, entries: list[TocEntryPage], exclude_pages: list[int] | None = None) -> list[TocEntryMatched]:
+        self._exclude = set(exclude_pages or [])
         results = []
         for entry in entries:
             matched = self._locate_one(entry)
@@ -27,34 +29,61 @@ class TocLocator:
         return results
 
     def _locate_one(self, entry: TocEntryPage) -> TocEntryMatched:
-        keyword = self._prepare_keyword(entry.title)
-        pages = None
-        if entry.page_hint:
-            # 在标注页码附近搜索（±3页）
-            start = max(0, entry.page_hint - 4)
-            end = min(self.reader.page_count, entry.page_hint + 3)
-            pages = list(range(start, end))
+        # 优先使用page_hint（目录页标注的页码更可靠）
+        if entry.page_hint is not None and 0 < entry.page_hint <= self.reader.page_count:
+            hint_page = entry.page_hint - 1  # 转0-based
+            # 尝试在hint附近搜索确认
+            keywords = self._prepare_keywords(entry.title)
+            start = max(0, hint_page - 5)
+            end = min(self.reader.page_count, hint_page + 5)
+            pages = [p for p in range(start, end) if p not in self._exclude]
 
-        search_results = self.reader.search_text(
-            keyword, pages=pages, threshold=self.threshold
-        )
+            best_result = None
+            for kw in keywords:
+                search_results = self.reader.search_text(
+                    kw, pages=pages, threshold=max(self.threshold, 95)
+                )
+                for r in search_results:
+                    if best_result is None or r.score > best_result.score:
+                        best_result = r
 
-        if not search_results and pages:
-            # 附近没找到，全文搜索
-            search_results = self.reader.search_text(
-                keyword, pages=None, threshold=self.threshold
-            )
-
-        if search_results:
-            best = search_results[0]
+            if best_result and best_result.score >= 95:
+                return TocEntryMatched(
+                    title=entry.title,
+                    level=entry.level,
+                    page=best_result.page,
+                    page_hint=entry.page_hint,
+                    score=best_result.score,
+                )
+            # 搜索不到或不可靠，直接信任page_hint
             return TocEntryMatched(
                 title=entry.title,
                 level=entry.level,
-                page=best.page,
+                page=hint_page,
                 page_hint=entry.page_hint,
-                score=best.score,
+                score=None,
             )
         else:
+            # 没有page_hint，全文搜索
+            keywords = self._prepare_keywords(entry.title)
+            all_pages = [p for p in range(self.reader.page_count) if p not in self._exclude]
+            best_result = None
+            for kw in keywords:
+                search_results = self.reader.search_text(
+                    kw, pages=all_pages, threshold=self.threshold
+                )
+                for r in search_results:
+                    if best_result is None or r.score > best_result.score:
+                        best_result = r
+
+            if best_result:
+                return TocEntryMatched(
+                    title=entry.title,
+                    level=entry.level,
+                    page=best_result.page,
+                    page_hint=entry.page_hint,
+                    score=best_result.score,
+                )
             return TocEntryMatched(
                 title=entry.title,
                 level=entry.level,
@@ -62,11 +91,18 @@ class TocLocator:
                 unmatched=True,
             )
 
-    def _prepare_keyword(self, title: str) -> str:
-        """清理标题，去除编号前缀只保留主题文本用于搜索。"""
-        import re
-        # 尝试提取：编号 + 空格 + 正文 的模式
-        # 如 "第1章 引言" -> "引言"
-        # 如 "1.1 背景" -> "背景"
-        # 但保留完整标题作为搜索词（更精确）
-        return title.strip()
+    def _prepare_keywords(self, title: str) -> list[str]:
+        """生成多个搜索关键词变体（完整标题 + 去前缀版）。"""
+        keywords = [title.replace(" ", "")]
+        # 尝试去掉编号前缀，只搜索正文部分
+        stripped = re.sub(
+            r"^(第[一二三四五六七八九十\d]+[章节篇]|"
+            r"\d+\.\d+(\.\d+)?|"
+            r"[（(][一二三四五六七八九十]+[）)]|"
+            r"[一二三四五六七八九十]+[、．.])"
+            r"\s*",
+            "", title
+        ).strip()
+        if stripped and stripped != title and len(stripped) >= 2:
+            keywords.append(stripped.replace(" ", ""))
+        return keywords

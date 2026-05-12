@@ -67,7 +67,7 @@ def test_extract(pdf_path: str, json_path: str):
     print(f"✓ 层级推断: {levels}")
 
     locator = TocLocator(reader)
-    matched = locator.locate(entries)
+    matched = locator.locate(entries, exclude_pages=[])
     matched_count = sum(1 for m in matched if not m.unmatched)
     assert matched_count >= 5, f"至少应匹配5条，实际: {matched_count}"
     print(f"✓ 正文定位: {matched_count}/7 成功")

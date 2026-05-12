@@ -39,7 +39,11 @@ def cmd_extract(args):
     print(f"解析到 {len(entries)} 条目录项")
 
     locator = TocLocator(reader, threshold=args.fuzzy_threshold)
-    matched = locator.locate(entries)
+    # 排除目录页本身和前后各一页
+    toc_exclude = [page_num, page_num + 1]
+    if page_num > 0:
+        toc_exclude.append(page_num - 1)
+    matched = locator.locate(entries, exclude_pages=toc_exclude)
 
     matched_count = sum(1 for m in matched if not m.unmatched)
     unmatched_count = sum(1 for m in matched if m.unmatched)
@@ -84,7 +88,10 @@ def cmd_auto(args):
     print(f"解析到 {len(entries)} 条目录项")
 
     locator = TocLocator(reader)
-    matched = locator.locate(entries)
+    toc_exclude = [page_num, page_num + 1]
+    if page_num > 0:
+        toc_exclude.append(page_num - 1)
+    matched = locator.locate(entries, exclude_pages=toc_exclude)
     matched_count = sum(1 for m in matched if not m.unmatched)
     print(f"定位成功: {matched_count}")
 
