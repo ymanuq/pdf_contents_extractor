@@ -17,8 +17,9 @@ class TocPageParser:
 
     # 标题前缀模式 -> 建议层级
     PREFIX_PATTERNS = [
-        (re.compile(r"第[一二三四五六七八九十百千\d]+[章节]"), 1),
-        (re.compile(r"第[一二三四五六七八九十百千\d]+篇"), 1),
+        (re.compile(r"第[一二三四五六七八九十百千\d]+[章节篇]"), 1),
+        # OCR容错：第X后跟任意CJK单字（如OCR把"章"误识为"党""革""覃"等）
+        (re.compile(r"第[一二三四五六七八九十\d]+\s*[一-鿿]"), 1),
         (re.compile(r"Chapter\s+\d+", re.IGNORECASE), 1),
         (re.compile(r"(?:Part|PART)\s+\d+", re.IGNORECASE), 1),
         (re.compile(r"\d+\.\d+\.\d+"), 3),
@@ -174,7 +175,6 @@ class TocPageParser:
             norm = self._normalize_for_match(line)
             is_new = self._match_prefix(norm)
             if not is_new and not buf:
-                # 无前缀时，需要足够的中文内容才认为是目录条目
                 cjk_chars = re.findall(r"[一-鿿]", line)
                 is_new = len(cjk_chars) >= 3 and not self._is_pure_page_number(line)
 
@@ -183,10 +183,37 @@ class TocPageParser:
                     merged.append(" ".join(buf))
                 buf = [line]
             elif buf:
+                # 缓冲区已有页码，又遇到独立页码 → 可能是被OCR摧毁的条目
+                if self._is_pure_page_number(line) and self._buf_has_page_number(buf):
+                    merged.append(" ".join(buf))
+                    buf = ["(OCR丢失)"]
                 buf.append(line)
         if buf:
             merged.append(" ".join(buf))
-        return merged
+        return self._split_merged_entries(merged)
+
+    def _buf_has_page_number(self, buf: list[str]) -> bool:
+        return any(self._has_page_number(line) for line in buf)
+
+    def _split_merged_entries(self, merged: list[str]) -> list[str]:
+        """拆分被错误合并的两个条目（两个页码间夹了大段CJK文本）。"""
+        result = []
+        for line in merged:
+            # 匹配: 页码 + 含CJK文本 + 另一个页码 的模式
+            parts = re.split(
+                r"(\d{2,4})\s+([一-鿿].*[一-鿿].*?)\s+(\d{2,4})$",
+                line
+            )
+            if len(parts) >= 4:
+                before = parts[0].strip()
+                num1 = parts[1]
+                cjk_text = parts[2].strip()
+                num2 = parts[3]
+                result.append(before + " " + num1)
+                result.append(cjk_text + " " + num2)
+            else:
+                result.append(line)
+        return result
 
     def _merge_split_prefix(self, lines: list[str]) -> list[str]:
         """合并被OCR拆分的标题编号（如'第 10' + '章'）。"""
