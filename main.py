@@ -15,6 +15,7 @@ from extractor.pdf_reader import PdfReader
 from extractor.toc_page_parser import TocPageParser
 from extractor.toc_locator import TocLocator
 from extractor.toc_writer import TocWriter
+from extractor.page_mapper import PageMapper
 
 
 def cmd_extract(args):
@@ -38,8 +39,23 @@ def cmd_extract(args):
     entries = parser.parse_entries(doc, page_num)
     print(f"解析到 {len(entries)} 条目录项")
 
+    # 印刷页码 → PDF页码 自动映射
+    mapper = PageMapper(doc)
+    mapping = mapper.build()
+    if mapping:
+        # 统计映射结果
+        converted = 0
+        for e in entries:
+            if e.page_hint is not None:
+                pdf_page = mapper.convert(e.page_hint)
+                if pdf_page is not None:
+                    e.page_hint = pdf_page + 1  # 转回1-based给locator
+                    converted += 1
+        print(f"页码映射: {converted}条从印刷页转为PDF页 (总检测{len(mapping)}个页码)")
+    else:
+        print("警告: 未能建立页码映射，将使用原始页码")
+
     locator = TocLocator(reader, threshold=args.fuzzy_threshold)
-    # 排除目录页本身和前后各一页
     toc_exclude = [page_num, page_num + 1]
     if page_num > 0:
         toc_exclude.append(page_num - 1)
@@ -55,6 +71,7 @@ def cmd_extract(args):
             "title": m.title,
             "level": m.level,
             "page": m.page,
+            "page_hint": m.page_hint,
             "unmatched": m.unmatched,
         })
 
